@@ -211,7 +211,6 @@ void Update(render_context* ctx, UINT width, UINT height)
         abort();
     }
 
-    // ctx->texture->QueryInterface(&IID_ID3D11Resource1, (LPVOID*) &sharedResource);
     hr = sharedResource->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ|DXGI_SHARED_RESOURCE_WRITE, NULL, &ctx->sharedHandled);
     if(FAILED(hr))
     {
@@ -241,10 +240,6 @@ void Update(render_context* ctx, UINT width, UINT height)
 
     d3d11VLC1->Release();
 
-    // ID3D11Device1_OpenSharedResource1(m_Device, sys->sharedHandle, &IID_ID3D11Resource, (void**)&copyTexture);
-
-    // et tu fais ta ID3D11ShaderResourceView a partir de copyTexture
-
     D3D11_SHADER_RESOURCE_VIEW_DESC resviewDesc;
     ZeroMemory(&resviewDesc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC));
     resviewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -266,16 +261,12 @@ void Update(render_context* ctx, UINT width, UINT height)
     renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
     ID3D11RenderTargetView* renderTarget;
-    FLOAT blueRGBA[] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    // FLOAT blueRGBA[] = { 0.0f, 0.0f, 1.0f, 1.0f };
     ctx->d3deviceUnity->CreateRenderTargetView(ctx->texture, &renderTargetViewDesc, &renderTarget);
-    ctx->d3dctxUnity->ClearRenderTargetView(renderTarget, blueRGBA);
+    // ctx->d3dctxUnity->ClearRenderTargetView(renderTarget, blueRGBA);
     renderTarget->Release();
 
-    //*
     hr = ctx->d3deviceVLC->CreateRenderTargetView(ctx->textureVLC, &renderTargetViewDesc, &ctx->textureRenderTarget);
-    /*/
-    hr = ctx->d3device->CreateRenderTargetView(ctx->texture, &renderTargetViewDesc, &ctx->textureRenderTarget);
-    //*/
     if (FAILED(hr))
     {
         DEBUG("CreateRenderTargetView FAILED \n");
@@ -390,8 +381,6 @@ bool StartRendering_cb( void *opaque, bool enter, const libvlc_video_direct3d_hd
 
         /* force unbinding the input texture, otherwise we get:
          * OMSetRenderTargets: Resource being set to OM RenderTarget slot 0 is still bound on input! */
-        // ID3D11ShaderResourceView *reset = NULL;
-        // ctx->d3dctx->PSSetShaderResources(0, 1, &reset);
         //ctx->d3dctx->Flush();
 
         ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
@@ -400,36 +389,7 @@ bool StartRendering_cb( void *opaque, bool enter, const libvlc_video_direct3d_hd
     }
 
     DEBUG("StartRendering end ");
-    /* render into the swapchain */
-    /*static const FLOAT orangeRGBA[4] = {1.0f, 0.5f, 0.0f, 1.0f};
 
-    ctx->d3dctx->OMSetRenderTargets(1, &ctx->swapchainRenderTarget, NULL);
-    ctx->d3dctx->ClearRenderTargetView(ctx->swapchainRenderTarget, orangeRGBA);
-
-    ctx->d3dctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    ctx->d3dctx->IASetInputLayout(ctx->pShadersInputLayout);
-    UINT offset = 0;
-    ctx->d3dctx->IASetVertexBuffers(0, 1, &ctx->pVertexBuffer, &ctx->vertexBufferStride, &offset);
-    ctx->d3dctx->IASetIndexBuffer(ctx->pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
-
-    ctx->d3dctx->VSSetShader(ctx->pVS, 0, 0);
-
-    ctx->d3dctx->PSSetSamplers(0, 1, &ctx->samplerState);
-
-    ctx->d3dctx->PSSetShaderResources(0, 1, &ctx->textureShaderInput);
-
-    ctx->d3dctx->PSSetShader(ctx->pPS, 0, 0);
-
-    D3D11_VIEWPORT viewport = { };
-    viewport.TopLeftX = 0;
-    viewport.TopLeftY = 0;
-    viewport.Width = SCREEN_WIDTH;
-    viewport.Height = SCREEN_HEIGHT;
-
-    ctx->d3dctx->RSSetViewports(1, &viewport);
-
-    ctx->d3dctx->DrawIndexed(ctx->quadIndexCount, 0, 0);*/
     DEBUG("out \n");
     return true;
 }
@@ -446,6 +406,11 @@ bool SelectPlane_cb( void *opaque, size_t plane )
 bool Setup_cb( void **opaque, const libvlc_video_direct3d_device_cfg_t *cfg, libvlc_video_direct3d_device_setup_t *out )
 {
     struct render_context *ctx = static_cast<struct render_context *>(*opaque);
+    if(ctx->d3dctxVLC == NULL)
+    {
+        DEBUG("ctx->d3dctxVLC is NULL");
+        abort();
+    }
     out->device_context = ctx->d3dctxVLC;
     return true;
 }
@@ -482,33 +447,11 @@ void Resize_cb( void *opaque,
 
 void* RenderAPI_D3D11::getVideoFrame(bool* out_updated)
 {
+    EnterCriticalSection(&Context.sizeLock);
     *out_updated = true;
-    //Context.d3dctx->OMSetRenderTargets(1, &Context.textureRenderTarget, NULL);
-    static const FLOAT orangeRGBA[4] = {1.0f, 0.5f, 0.0f, 1.0f};
-    //*
-    Context.d3dctxVLC->OMSetRenderTargets(1, &Context.textureRenderTarget, NULL);
-    Context.d3dctxVLC->ClearRenderTargetView(Context.textureRenderTarget, orangeRGBA);
-    /*/
-    Context.d3dctx->ClearRenderTargetView(Context.textureRenderTarget, orangeRGBA);
-    //*/
+
+    LeaveCriticalSection(&Context.sizeLock);
     return Context.textureShaderInput;
-    /*
-    *out_updated = Context.updated;
-    Context.updated = false;
-    return (void*)Context.textureShaderInput;*/
-
-    // std::lock_guard<std::mutex> lock(text_lock);
-    // if (out_updated)
-    //     *out_updated = updated;
-    // if (updated)
-    // {
-    //     std::swap(idx_swap, idx_display);
-    //     updated = false;
-    // }
-    // //DEBUG("get Video Frame %u", tex[idx_display]);
-    // return (void*)(size_t)tex[idx_display];
 }
-
-
 
 // #endif // #if SUPPORT_D3D11
