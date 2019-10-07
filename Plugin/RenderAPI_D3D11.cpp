@@ -35,8 +35,8 @@ struct render_context
     ID3D11RenderTargetView  *textureRenderTarget;
 
     /* Direct3D11 device/context */
-    ID3D11Device        *d3device;
-    ID3D11DeviceContext *d3dctx;
+    ID3D11Device        *d3deviceUnity;
+    ID3D11DeviceContext *d3dctxUnity;
 
     UINT vertexBufferStride;
     ID3D11Buffer *pVertexBuffer;
@@ -192,7 +192,7 @@ void Update(render_context* ctx, UINT width, UINT height)
     texDesc.Height = height;
     texDesc.Width  = width;
     
-    hr = ctx->d3device->CreateTexture2D( &texDesc, NULL, &ctx->texture );
+    hr = ctx->d3deviceUnity->CreateTexture2D( &texDesc, NULL, &ctx->texture );
     if (FAILED(hr))
     {
         DEBUG("CreateTexture2D FAILED \n");
@@ -250,7 +250,7 @@ void Update(render_context* ctx, UINT width, UINT height)
     resviewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     resviewDesc.Texture2D.MipLevels = 1;
     resviewDesc.Format = texDesc.Format;
-    hr = ctx->d3device->CreateShaderResourceView(ctx->texture, &resviewDesc, &ctx->textureShaderInput );
+    hr = ctx->d3deviceUnity->CreateShaderResourceView(ctx->texture, &resviewDesc, &ctx->textureShaderInput );
     if (FAILED(hr)) 
     {
         DEBUG("CreateShaderResourceView FAILED \n");
@@ -267,8 +267,8 @@ void Update(render_context* ctx, UINT width, UINT height)
 
     ID3D11RenderTargetView* renderTarget;
     FLOAT blueRGBA[] = { 0.0f, 0.0f, 1.0f, 1.0f };
-    ctx->d3device->CreateRenderTargetView(ctx->texture, &renderTargetViewDesc, &renderTarget);
-    ctx->d3dctx->ClearRenderTargetView(renderTarget, blueRGBA);
+    ctx->d3deviceUnity->CreateRenderTargetView(ctx->texture, &renderTargetViewDesc, &renderTarget);
+    ctx->d3dctxUnity->ClearRenderTargetView(renderTarget, blueRGBA);
     renderTarget->Release();
 
     //*
@@ -296,8 +296,8 @@ void RenderAPI_D3D11::CreateResources(struct render_context *ctx, ID3D11Device *
 
     ctx->width = Width;
     ctx->height = Height;
-    ctx->d3device = d3device;
-    ctx->d3dctx = d3dctx;
+    ctx->d3deviceUnity = d3device;
+    ctx->d3dctxUnity = d3dctx;
 
     UINT creationFlags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT; /* needed for hardware decoding */
     creationFlags |= D3D11_CREATE_DEVICE_DEBUG; //TODO: remove for release mode
@@ -323,7 +323,7 @@ void RenderAPI_D3D11::CreateResources(struct render_context *ctx, ID3D11Device *
 
     /* The ID3D11Device must have multithread protection */
     ID3D10Multithread *pMultithread;
-    hr = ctx->d3device->QueryInterface(&pMultithread);
+    hr = ctx->d3deviceUnity->QueryInterface(&pMultithread);
     if (SUCCEEDED(hr)) {
         pMultithread->SetMultithreadProtected(TRUE);
         pMultithread->Release();
@@ -346,8 +346,8 @@ void RenderAPI_D3D11::ReleaseResources(struct render_context *ctx)
     ctx->textureShaderInput->Release();
     ctx->texture->Release();
     ctx->pVertexBuffer->Release();
-    ctx->d3dctx->Release();
-    ctx->d3device->Release();
+    ctx->d3dctxUnity->Release();
+    ctx->d3deviceUnity->Release();
 }
 
 bool UpdateOutput_cb( void *opaque, const libvlc_video_direct3d_cfg_t *cfg, libvlc_video_output_cfg_t *out )
