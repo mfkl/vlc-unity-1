@@ -44,11 +44,6 @@ struct render_context
     ID3D11Device        *d3deviceUnity;
     ID3D11DeviceContext *d3dctxUnity;
 
-    UINT vertexBufferStride;
-    ID3D11Buffer *pVertexBuffer;
-
-    UINT quadIndexCount;
-
     /* texture VLC renders into */
     ID3D11Texture2D          *texture0;
     ID3D11ShaderResourceView *textureShaderInput0;
@@ -353,8 +348,6 @@ void RenderAPI_D3D11::CreateResources(struct render_context *ctx, ID3D11Device *
         pMultithread->Release();
     }
 
-    ctx->quadIndexCount = 6;
-
     Update(ctx, SCREEN_WIDTH, SCREEN_HEIGHT);
     DEBUG("Exiting CreateResources.\n");
 }
@@ -369,7 +362,6 @@ void RenderAPI_D3D11::ReleaseResources(struct render_context *ctx)
     ctx->textureRenderTarget->Release();
     ctx->textureShaderInput0->Release();
     ctx->texture0->Release();
-    ctx->pVertexBuffer->Release();
     ctx->d3dctxUnity->Release();
     ctx->d3deviceUnity->Release();
 }
