@@ -37,7 +37,8 @@ struct render_context
     ID3D11DeviceContext     *d3dctxVLC;
     ID3D11Texture2D         *textureVLC0; // shared between VLC and the app
     ID3D11Texture2D         *textureVLC1;
-    HANDLE                  sharedHandled; // handle of the texture used by VLC and the app
+    HANDLE                  sharedHandle0;
+    HANDLE                  sharedHandle1;
     ID3D11RenderTargetView  *textureRenderTarget;
 
     /* Direct3D11 device/context */
@@ -211,16 +212,17 @@ void Update(render_context* ctx, UINT width, UINT height)
 
     ctx->d3dctxUnity->CopyResource(ctx->texture1, ctx->texture0);
 
-    IDXGIResource1* sharedResource = NULL;
+    IDXGIResource1* sharedResource0 = NULL;
+    IDXGIResource1* sharedResource1 = NULL;
 
-    hr = ctx->texture0->QueryInterface(&sharedResource);
+    hr = ctx->texture0->QueryInterface(&sharedResource0);
     if(FAILED(hr))
     {
         DEBUG("get IDXGIResource1 FAILED \n");
         abort();
     }
 
-    hr = sharedResource->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ|DXGI_SHARED_RESOURCE_WRITE, NULL, &ctx->sharedHandled);
+    hr = sharedResource0->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ|DXGI_SHARED_RESOURCE_WRITE, NULL, &ctx->sharedHandle0);
     if(FAILED(hr))
     {
         _com_error error(hr);
@@ -228,9 +230,34 @@ void Update(render_context* ctx, UINT width, UINT height)
         abort();
     }
 
-    sharedResource->Release();
+    hr = ctx->texture1->QueryInterface(&sharedResource1);
+    if(FAILED(hr))
+    {
+        DEBUG("get IDXGIResource1 FAILED \n");
+        abort();
+    }
 
+    hr = sharedResource1->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ|DXGI_SHARED_RESOURCE_WRITE, NULL, &ctx->sharedHandle1);
+    if(FAILED(hr))
+    {
+        _com_error error(hr);
+        DEBUG("sharedResource->CreateSharedHandle FAILED %s \n", error.ErrorMessage());
+        abort();
+    }
+
+    sharedResource0->Release();
+    sharedResource1->Release();
+
+    ID3D11Device1* d3d11VLC0;
     ID3D11Device1* d3d11VLC1;
+
+    hr = ctx->d3deviceVLC->QueryInterface(&d3d11VLC0);
+    if(FAILED(hr))
+    {
+        _com_error error(hr);
+        DEBUG("QueryInterface ID3D11Device1 FAILED %s \n", error.ErrorMessage());
+        abort();
+    }
     hr = ctx->d3deviceVLC->QueryInterface(&d3d11VLC1);
     if(FAILED(hr))
     {
@@ -239,7 +266,15 @@ void Update(render_context* ctx, UINT width, UINT height)
         abort();
     }
     
-    hr = d3d11VLC1->OpenSharedResource1(ctx->sharedHandled, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC0);
+    
+    hr = d3d11VLC0->OpenSharedResource1(ctx->sharedHandle0, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC0);
+    if(FAILED(hr))
+    {
+        _com_error error(hr);
+        DEBUG("ctx->d3device->OpenSharedResource FAILED %s \n", error.ErrorMessage());
+        abort();
+    }
+    hr = d3d11VLC1->OpenSharedResource1(ctx->sharedHandle1, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC1);
     if(FAILED(hr))
     {
         _com_error error(hr);
@@ -247,10 +282,9 @@ void Update(render_context* ctx, UINT width, UINT height)
         abort();
     }
 
-    hr = d3d11VLC1->OpenSharedResource1(ctx->sharedHandled, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC1);
-
     ctx->d3dctxVLC->CopyResource(ctx->textureVLC1, ctx->textureVLC0);
 
+    d3d11VLC0->Release();
     d3d11VLC1->Release();
 
     D3D11_SHADER_RESOURCE_VIEW_DESC resviewDesc;
@@ -269,14 +303,6 @@ void Update(render_context* ctx, UINT width, UINT height)
     }
 
     hr = ctx->d3deviceUnity->CreateShaderResourceView(ctx->texture1, &resviewDesc, &ctx->textureShaderInput1);
-
-    // ID3D11Resource* textureShaderInputResource0 = NULL;
-    // ctx->textureShaderInput0->GetResource(&textureShaderInputResource0);
-
-    // ID3D11Resource* textureShaderInputResource1 = NULL;
-    // ctx->textureShaderInput1->GetResource(&textureShaderInputResource1);
-
-    // ctx->d3dctxUnity->CopyResource(textureShaderInputResource1, textureShaderInputResource0); // is this enough to update ctx->textureShaderInput1?
 
     memcpy(ctx->textureShaderInput1, ctx->textureShaderInput0, sizeof(ID3D11ShaderResourceView));
 
@@ -410,7 +436,7 @@ bool StartRendering_cb( void *opaque, bool enter, const libvlc_video_direct3d_hd
          * OMSetRenderTargets: Resource being set to OM RenderTarget slot 0 is still bound on input! */
         //ctx->d3dctx->Flush();
 
-        // ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
+        ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
         DEBUG("out \n");
         return true;
     }
