@@ -16,7 +16,12 @@
 #include <algorithm>
 #include <dxgi1_2.h>
 #include <comdef.h>
-#include <mingw.mutex.h>
+
+#if UNITY_WIN
+#  include <mingw.mutex.h>
+#else
+#  include <mutex>
+#endif
 
 #define SCREEN_WIDTH  100
 #define SCREEN_HEIGHT  100
@@ -30,7 +35,8 @@ struct render_context
     /* resources shared by VLC */
     ID3D11Device            *d3deviceVLC;
     ID3D11DeviceContext     *d3dctxVLC;
-    ID3D11Texture2D         *textureVLC; // shared between VLC and the app
+    ID3D11Texture2D         *textureVLC0; // shared between VLC and the app
+    ID3D11Texture2D         *textureVLC1;
     HANDLE                  sharedHandled; // handle of the texture used by VLC and the app
     ID3D11RenderTargetView  *textureRenderTarget;
 
@@ -44,9 +50,10 @@ struct render_context
     UINT quadIndexCount;
 
     /* texture VLC renders into */
-    ID3D11Texture2D          *texture;
-    ID3D11ShaderResourceView *textureShaderInput;
-
+    ID3D11Texture2D          *texture0;
+    ID3D11ShaderResourceView *textureShaderInput0;
+    ID3D11Texture2D          *texture1;
+    ID3D11ShaderResourceView *textureShaderInput1;
     CRITICAL_SECTION sizeLock; // the ReportSize callback cannot be called during/after the Cleanup_cb is called
     unsigned width, height;
     void (*ReportSize)(void *ReportOpaque, unsigned width, unsigned height);
@@ -75,6 +82,7 @@ private:
     const UINT Width = SCREEN_WIDTH;
     const UINT Height = SCREEN_HEIGHT;
     bool initialized;
+    // std::mutex text_lock;
     // const std::mutex text_lock;
 };
 
@@ -161,15 +169,15 @@ void Update(render_context* ctx, UINT width, UINT height)
     HRESULT hr;
     DEBUG("start releasing d3d objects.\n");
 
-    if (ctx->texture)
+    if (ctx->texture0)
     {
-        ctx->texture->Release();
-        ctx->texture = NULL;
+        ctx->texture0->Release();
+        ctx->texture0 = NULL;
     }
-    if (ctx->textureShaderInput)
+    if (ctx->textureShaderInput0)
     {
-        ctx->textureShaderInput->Release();
-        ctx->textureShaderInput = NULL;
+        ctx->textureShaderInput0->Release();
+        ctx->textureShaderInput0 = NULL;
     }
     if (ctx->textureRenderTarget)
     {
@@ -192,7 +200,8 @@ void Update(render_context* ctx, UINT width, UINT height)
     texDesc.Height = height;
     texDesc.Width  = width;
     
-    hr = ctx->d3deviceUnity->CreateTexture2D( &texDesc, NULL, &ctx->texture );
+    DEBUG("running... ctx->d3deviceUnity->CreateTexture2D( &texDesc, NULL, &ctx->texture ) \n");
+    hr = ctx->d3deviceUnity->CreateTexture2D( &texDesc, NULL, &ctx->texture0);
     if (FAILED(hr))
     {
         DEBUG("CreateTexture2D FAILED \n");
@@ -201,10 +210,15 @@ void Update(render_context* ctx, UINT width, UINT height)
     {
         DEBUG("CreateTexture2D SUCCEEDED.\n");
     }
+    DEBUG("ctx->d3deviceUnity->CreateTexture2D( &texDesc, NULL, &ctx->texture ) DONE \n");
+
+    hr = ctx->d3deviceUnity->CreateTexture2D( &texDesc, NULL, &ctx->texture1);
+
+    ctx->d3dctxUnity->CopyResource(ctx->texture1, ctx->texture0);
 
     IDXGIResource1* sharedResource = NULL;
 
-    hr = ctx->texture->QueryInterface(&sharedResource);
+    hr = ctx->texture0->QueryInterface(&sharedResource);
     if(FAILED(hr))
     {
         DEBUG("get IDXGIResource1 FAILED \n");
@@ -230,13 +244,17 @@ void Update(render_context* ctx, UINT width, UINT height)
         abort();
     }
     
-    hr = d3d11VLC1->OpenSharedResource1(ctx->sharedHandled, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC);
+    hr = d3d11VLC1->OpenSharedResource1(ctx->sharedHandled, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC0);
     if(FAILED(hr))
     {
         _com_error error(hr);
         DEBUG("ctx->d3device->OpenSharedResource FAILED %s \n", error.ErrorMessage());
         abort();
     }
+
+    hr = d3d11VLC1->OpenSharedResource1(ctx->sharedHandled, __uuidof(ID3D11Texture2D), (void**)&ctx->textureVLC1);
+
+    ctx->d3dctxVLC->CopyResource(ctx->textureVLC1, ctx->textureVLC0);
 
     d3d11VLC1->Release();
 
@@ -245,7 +263,7 @@ void Update(render_context* ctx, UINT width, UINT height)
     resviewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     resviewDesc.Texture2D.MipLevels = 1;
     resviewDesc.Format = texDesc.Format;
-    hr = ctx->d3deviceUnity->CreateShaderResourceView(ctx->texture, &resviewDesc, &ctx->textureShaderInput );
+    hr = ctx->d3deviceUnity->CreateShaderResourceView(ctx->texture0, &resviewDesc, &ctx->textureShaderInput0);
     if (FAILED(hr)) 
     {
         DEBUG("CreateShaderResourceView FAILED \n");
@@ -255,18 +273,28 @@ void Update(render_context* ctx, UINT width, UINT height)
         DEBUG("CreateShaderResourceView SUCCEEDED.\n");
     }
 
+    hr = ctx->d3deviceUnity->CreateShaderResourceView(ctx->texture1, &resviewDesc, &ctx->textureShaderInput1);
+
+    // ID3D11Resource* textureShaderInputResource0 = NULL;
+    // ctx->textureShaderInput0->GetResource(&textureShaderInputResource0);
+
+    // ID3D11Resource* textureShaderInputResource1 = NULL;
+    // ctx->textureShaderInput1->GetResource(&textureShaderInputResource1);
+
+    // ctx->d3dctxUnity->CopyResource(textureShaderInputResource1, textureShaderInputResource0); // is this enough to update ctx->textureShaderInput1?
+
+    memcpy(ctx->textureShaderInput1, ctx->textureShaderInput0, sizeof(ID3D11ShaderResourceView));
+
     D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
     ZeroMemory(&renderTargetViewDesc, sizeof(D3D11_RENDER_TARGET_VIEW_DESC));
     renderTargetViewDesc.Format = texDesc.Format;
     renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
     ID3D11RenderTargetView* renderTarget;
-    // FLOAT blueRGBA[] = { 0.0f, 0.0f, 1.0f, 1.0f };
-    ctx->d3deviceUnity->CreateRenderTargetView(ctx->texture, &renderTargetViewDesc, &renderTarget);
-    // ctx->d3dctxUnity->ClearRenderTargetView(renderTarget, blueRGBA);
+    ctx->d3deviceUnity->CreateRenderTargetView(ctx->texture0, &renderTargetViewDesc, &renderTarget);
     renderTarget->Release();
 
-    hr = ctx->d3deviceVLC->CreateRenderTargetView(ctx->textureVLC, &renderTargetViewDesc, &ctx->textureRenderTarget);
+    hr = ctx->d3deviceVLC->CreateRenderTargetView(ctx->textureVLC0, &renderTargetViewDesc, &ctx->textureRenderTarget);
     if (FAILED(hr))
     {
         DEBUG("CreateRenderTargetView FAILED \n");
@@ -319,6 +347,11 @@ void RenderAPI_D3D11::CreateResources(struct render_context *ctx, ID3D11Device *
         pMultithread->SetMultithreadProtected(TRUE);
         pMultithread->Release();
     }
+    hr = ctx->d3deviceVLC->QueryInterface(&pMultithread);
+    if (SUCCEEDED(hr)) {
+        pMultithread->SetMultithreadProtected(TRUE);
+        pMultithread->Release();
+    }
 
     ctx->quadIndexCount = 6;
 
@@ -334,8 +367,8 @@ void RenderAPI_D3D11::ReleaseResources(struct render_context *ctx)
     ctx->d3dctxVLC->Release();
 
     ctx->textureRenderTarget->Release();
-    ctx->textureShaderInput->Release();
-    ctx->texture->Release();
+    ctx->textureShaderInput0->Release();
+    ctx->texture0->Release();
     ctx->pVertexBuffer->Release();
     ctx->d3dctxUnity->Release();
     ctx->d3deviceUnity->Release();
@@ -368,6 +401,8 @@ void Swap_cb( void* opaque )
     DEBUG("libvlc SWAP \n");
 
     struct render_context *ctx = static_cast<struct render_context *>( opaque );
+    std::swap(ctx->textureShaderInput0, ctx->textureShaderInput1);
+
     ctx->updated = true;
 }
 
@@ -383,7 +418,7 @@ bool StartRendering_cb( void *opaque, bool enter, const libvlc_video_direct3d_hd
          * OMSetRenderTargets: Resource being set to OM RenderTarget slot 0 is still bound on input! */
         //ctx->d3dctx->Flush();
 
-        ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
+        // ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
         DEBUG("out \n");
         return true;
     }
@@ -447,11 +482,12 @@ void Resize_cb( void *opaque,
 
 void* RenderAPI_D3D11::getVideoFrame(bool* out_updated)
 {
-    EnterCriticalSection(&Context.sizeLock);
+    // std::lock_guard<std::mutex> lock(text_lock);
+
     *out_updated = true;
 
-    LeaveCriticalSection(&Context.sizeLock);
-    return Context.textureShaderInput;
+    std::swap(Context.textureShaderInput0, Context.textureShaderInput1);
+    return Context.textureShaderInput1;
 }
 
 // #endif // #if SUPPORT_D3D11
