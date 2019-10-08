@@ -39,7 +39,8 @@ struct render_context
     ID3D11Texture2D         *textureVLC1;
     HANDLE                  sharedHandle0;
     HANDLE                  sharedHandle1;
-    ID3D11RenderTargetView  *textureRenderTarget;
+    ID3D11RenderTargetView  *textureRenderTarget0;
+    ID3D11RenderTargetView  *textureRenderTarget1;
 
     /* Direct3D11 device/context */
     ID3D11Device        *d3deviceUnity;
@@ -175,10 +176,10 @@ void Update(render_context* ctx, UINT width, UINT height)
         ctx->textureShaderInput0->Release();
         ctx->textureShaderInput0 = NULL;
     }
-    if (ctx->textureRenderTarget)
+    if (ctx->textureRenderTarget0)
     {
-        ctx->textureRenderTarget->Release();
-        ctx->textureRenderTarget = NULL;
+        ctx->textureRenderTarget0->Release();
+        ctx->textureRenderTarget0 = NULL;
     }
 
     DEBUG("Done releasing d3d objects.\n");
@@ -315,7 +316,12 @@ void Update(render_context* ctx, UINT width, UINT height)
     ctx->d3deviceUnity->CreateRenderTargetView(ctx->texture0, &renderTargetViewDesc, &renderTarget);
     renderTarget->Release();
 
-    hr = ctx->d3deviceVLC->CreateRenderTargetView(ctx->textureVLC0, &renderTargetViewDesc, &ctx->textureRenderTarget);
+    hr = ctx->d3deviceVLC->CreateRenderTargetView(ctx->textureVLC0, &renderTargetViewDesc, &ctx->textureRenderTarget0);
+    if (FAILED(hr))
+    {
+        DEBUG("CreateRenderTargetView FAILED \n");
+    }
+    hr = ctx->d3deviceVLC->CreateRenderTargetView(ctx->textureVLC1, &renderTargetViewDesc, &ctx->textureRenderTarget1);
     if (FAILED(hr))
     {
         DEBUG("CreateRenderTargetView FAILED \n");
@@ -340,7 +346,7 @@ void RenderAPI_D3D11::CreateResources(struct render_context *ctx, ID3D11Device *
     ctx->d3dctxUnity = d3dctx;
 
     UINT creationFlags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT; /* needed for hardware decoding */
-    creationFlags |= D3D11_CREATE_DEVICE_DEBUG; //TODO: remove for release mode
+    // creationFlags |= D3D11_CREATE_DEVICE_DEBUG; //TODO: remove for release mode
 
     hr = D3D11CreateDevice(NULL,
                         D3D_DRIVER_TYPE_HARDWARE,
@@ -385,9 +391,14 @@ void RenderAPI_D3D11::ReleaseResources(struct render_context *ctx)
     ctx->d3deviceVLC->Release();
     ctx->d3dctxVLC->Release();
 
-    ctx->textureRenderTarget->Release();
+    ctx->textureRenderTarget0->Release();
+    ctx->textureRenderTarget1->Release();
     ctx->textureShaderInput0->Release();
+    ctx->textureShaderInput1->Release();
+
     ctx->texture0->Release();
+    ctx->texture1->Release();
+
     ctx->d3dctxUnity->Release();
     ctx->d3deviceUnity->Release();
 }
@@ -436,7 +447,7 @@ bool StartRendering_cb( void *opaque, bool enter, const libvlc_video_direct3d_hd
          * OMSetRenderTargets: Resource being set to OM RenderTarget slot 0 is still bound on input! */
         //ctx->d3dctx->Flush();
 
-        ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
+        // ctx->d3dctxVLC->ClearRenderTargetView( ctx->textureRenderTarget, blackRGBA);
         DEBUG("out \n");
         return true;
     }
@@ -449,10 +460,11 @@ bool StartRendering_cb( void *opaque, bool enter, const libvlc_video_direct3d_hd
 
 bool SelectPlane_cb( void *opaque, size_t plane )
 {
+    DEBUG("SelectPlane \n");
     struct render_context *ctx = static_cast<struct render_context *>( opaque );
     if ( plane != 0 ) // we only support one packed RGBA plane (DXGI_FORMAT_R8G8B8A8_UNORM)
         return false;
-    ctx->d3dctxVLC->OMSetRenderTargets( 1, &ctx->textureRenderTarget, NULL );
+    ctx->d3dctxVLC->OMSetRenderTargets( 1, &ctx->textureRenderTarget0, NULL );
     return true;
 }
 
