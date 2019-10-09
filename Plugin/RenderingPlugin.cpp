@@ -27,7 +27,6 @@ static IUnityInterfaces* s_UnityInterfaces = NULL;
 
 static UINT Width;
 static UINT Height;
-static void* Hwnd;
 
 /** LibVLC's API function exported to Unity
  *
@@ -74,11 +73,7 @@ CreateAndInitMediaPlayer(libvlc_instance_t* libvlc)
     {
         DEBUG("s_CurrentAPI is NULL \n");    
     }
-    
-    // DEBUG("Calling... SetupTextureInfo \n");
-    
-    // s_CurrentAPI->SetupTextureInfo(Width, Height, Hwnd);
-    
+        
     DEBUG("Calling... ProcessDeviceEvent \n");
     
     s_CurrentAPI->ProcessDeviceEvent(kUnityGfxDeviceEventInitialize, s_UnityInterfaces);
