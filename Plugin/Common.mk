@@ -4,7 +4,7 @@ SRCS = RenderingPlugin.cpp RenderAPI.cpp RenderAPI_D3D11.cpp Log.cpp
 
 OBJS = $(SRCS:.cpp=.o)
 
-CXXFLAGS = -O2 -fdebug-prefix-map='/mnt/d/'='d:/' -Wall -I./include/ -I./mingw.thread
+CXXFLAGS = -O2 -fdebug-prefix-map='/mnt/d/'='d:/' -Wall -I./include/
 # LDFLAGS = -shared -m64
 # gcc (ubuntu)
 #LDFLAGS = -static-libgcc -static-libstdc++ -shared -L/mnt/d/Projects/vlc/win64/win64/vlc-4.0.0-dev/sdk/lib
