@@ -16,12 +16,7 @@
 #include <algorithm>
 #include <dxgi1_2.h>
 #include <comdef.h>
-
-#if UNITY_WIN
-#  include <mingw.mutex.h>
-#else
-#  include <mutex>
-#endif
+#include <mutex>
 
 #define SCREEN_WIDTH  100
 #define SCREEN_HEIGHT  100
@@ -55,6 +50,7 @@ struct render_context
     unsigned width, height;
     void (*ReportSize)(void *ReportOpaque, unsigned width, unsigned height);
     void *ReportOpaque;
+    std::mutex text_lock;
 
     bool updated;
 };
@@ -79,8 +75,6 @@ private:
     const UINT Width = SCREEN_WIDTH;
     const UINT Height = SCREEN_HEIGHT;
     bool initialized;
-    // std::mutex text_lock;
-    // const std::mutex text_lock;
 };
 
 // d3d11 callbacks
@@ -428,8 +422,9 @@ bool UpdateOutput_cb( void *opaque, const libvlc_video_direct3d_cfg_t *cfg, libv
 void Swap_cb( void* opaque )
 {
     DEBUG("libvlc SWAP \n");
-
     struct render_context *ctx = static_cast<struct render_context *>( opaque );
+
+    std::lock_guard<std::mutex> lock(ctx->text_lock);
     std::swap(ctx->textureShaderInput0, ctx->textureShaderInput1);
 
     ctx->updated = true;
@@ -512,7 +507,7 @@ void Resize_cb( void *opaque,
 
 void* RenderAPI_D3D11::getVideoFrame(bool* out_updated)
 {
-    // std::lock_guard<std::mutex> lock(text_lock);
+    std::lock_guard<std::mutex> lock(Context.text_lock);
 
     *out_updated = true;
 
