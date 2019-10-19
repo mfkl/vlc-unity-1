@@ -25,6 +25,15 @@
 #define BORDER_TOP     ( 0.95f)
 #define BORDER_BOTTOM  (-0.90f)
 
+class TextureBuffer {
+    public:
+    ID3D11Texture2D          *m_textureUnity         = nullptr;
+    ID3D11ShaderResourceView *m_textureShaderInput   = nullptr;
+    HANDLE                   m_sharedHandle          = nullptr; // handle of the texture used by VLC and the app
+    ID3D11RenderTargetView   *m_textureRenderTarget  = nullptr;
+};
+
+
 class RenderAPI_D3D11 : public RenderAPI
 {
 public:
@@ -44,20 +53,22 @@ public:
 private:
 	void CreateResources(ID3D11Device *d3device, ID3D11DeviceContext *d3dctx);
 	void ReleaseResources();
+    void ReleaseBuffer(TextureBuffer* buffer);
+    void InitBuffer(TextureBuffer* buffer);
     void DebugInUnity(LPCSTR message);
     void Update(UINT width, UINT height);
 
     /* Unity side resources */
 	ID3D11Device             *m_d3deviceUnity       = nullptr;
 	ID3D11DeviceContext      *m_d3dctxUnity         = nullptr;
-    ID3D11Texture2D          *m_textureUnity        = nullptr;
-    ID3D11ShaderResourceView *m_textureShaderInput  = nullptr;
-    HANDLE                   m_sharedHandle         = nullptr; // handle of the texture used by VLC and the app
 
     /* VLC side resources */
     ID3D11Device            *m_d3deviceVLC          = nullptr;
     ID3D11DeviceContext     *m_d3dctxVLC            = nullptr;
-    ID3D11RenderTargetView  *m_textureRenderTarget  = nullptr;
+
+    /* Texture buffers */
+    TextureBuffer           *m_frontBuffer          = nullptr;
+    TextureBuffer           *m_backBuffer           = nullptr;
 
     CRITICAL_SECTION m_sizeLock; // the ReportSize callback cannot be called during/after the Cleanup_cb is called
     unsigned m_width = 0;
@@ -68,9 +79,6 @@ private:
     bool m_updated = false;
 
     CRITICAL_SECTION m_outputLock; // the ReportSize callback cannot be called during/after the Cleanup_cb is called
-    ID3D11Texture2D  *m_outputTexture = nullptr;
-
-    bool m_initialized = false;
 };
 
 // VLC C-style callbacks
@@ -174,138 +182,19 @@ void RenderAPI_D3D11::ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInt
 
 void RenderAPI_D3D11::Update(UINT width, UINT height)
 {
-    DXGI_FORMAT renderFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    HRESULT hr;
     DEBUG("start releasing d3d objects.\n");
     EnterCriticalSection(&m_outputLock);
 
     m_width = width;
     m_height = height;
-    if (m_textureUnity)
-    {
-        m_textureUnity->Release();
-        m_textureUnity = NULL;
-    }
-    if (m_textureShaderInput)
-    {
-        m_textureShaderInput->Release();
-        m_textureShaderInput = NULL;
-    }
-    if (m_textureRenderTarget)
-    {
-        m_textureRenderTarget->Release();
-        m_textureRenderTarget = NULL;
-    }
-    if(m_sharedHandle)
-    {
-        CloseHandle(m_sharedHandle);
-        m_sharedHandle = nullptr;
-    }
+
+    ReleaseBuffer(m_frontBuffer);
+    ReleaseBuffer(m_backBuffer);
 
     DEBUG("Done releasing d3d objects.\n");
 
-    /* interim texture */
-    D3D11_TEXTURE2D_DESC texDesc = { 0 };
-    texDesc.MipLevels = 1;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.CPUAccessFlags = 0;
-    texDesc.ArraySize = 1;
-    texDesc.Format = renderFormat;
-    texDesc.Height = height;
-    texDesc.Width  = width;
-    
-    hr = m_d3deviceUnity->CreateTexture2D( &texDesc, NULL, &m_outputTexture );
-    if (FAILED(hr))
-    {
-        DEBUG("Create output Texture2D FAILED \n");
-    }
-    else
-    {
-        DEBUG("Create output Texture2D SUCCEEDED \n");
-    }
-
-    texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
-    
-    hr = m_d3deviceUnity->CreateTexture2D( &texDesc, NULL, &m_textureUnity );
-    if (FAILED(hr))
-    {
-        DEBUG("CreateTexture2D FAILED \n");
-    }
-    else
-    {
-        DEBUG("CreateTexture2D SUCCEEDED.\n");
-    }
-
-    IDXGIResource1* sharedResource = NULL;
-
-    hr = m_textureUnity->QueryInterface(&sharedResource);
-    if(FAILED(hr))
-    {
-        DEBUG("get IDXGIResource1 FAILED \n");
-        abort();
-    }
-
-    HANDLE sharedHandle;
-
-    hr = sharedResource->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, NULL, &m_sharedHandle);
-    if(FAILED(hr))
-    {
-        _com_error error(hr);
-        DEBUG("sharedResource->CreateSharedHandle FAILED %s \n", error.ErrorMessage());
-        abort();
-    }
-
-    sharedResource->Release();
-
-    ID3D11Device1* d3d11VLC1;
-    hr = m_d3deviceVLC->QueryInterface(&d3d11VLC1);
-    if(FAILED(hr))
-    {
-        _com_error error(hr);
-        DEBUG("QueryInterface ID3D11Device1 FAILED %s \n", error.ErrorMessage());
-        abort();
-    }
-    
-    ID3D11Texture2D* textureVLC;
-    hr = d3d11VLC1->OpenSharedResource1(m_sharedHandle, __uuidof(ID3D11Texture2D), (void**)&textureVLC);
-    if(FAILED(hr))
-    {
-        _com_error error(hr);
-        DEBUG("ctx->d3device->OpenSharedResource FAILED %s \n", error.ErrorMessage());
-        abort();
-    }
-
-    d3d11VLC1->Release();
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC resviewDesc;
-    ZeroMemory(&resviewDesc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC));
-    resviewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    resviewDesc.Texture2D.MipLevels = 1;
-    resviewDesc.Format = texDesc.Format;
-    hr = m_d3deviceUnity->CreateShaderResourceView(m_outputTexture, &resviewDesc, &m_textureShaderInput);
-    if (FAILED(hr))
-    {
-        DEBUG("CreateShaderResourceView FAILED \n");
-    }
-    else
-    {
-        DEBUG("CreateShaderResourceView SUCCEEDED.\n");
-    }
-
-    D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
-    ZeroMemory(&renderTargetViewDesc, sizeof(D3D11_RENDER_TARGET_VIEW_DESC));
-    renderTargetViewDesc.Format = texDesc.Format;
-    renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-
-    hr = m_d3deviceVLC->CreateRenderTargetView(textureVLC, &renderTargetViewDesc, &m_textureRenderTarget);
-    if (FAILED(hr))
-    {
-        DEBUG("CreateRenderTargetView FAILED \n");
-    }
-
-    textureVLC->Release();// No need to keep a reference to that, VLC only writes to the renderTarget
+    InitBuffer(m_frontBuffer);
+    InitBuffer(m_backBuffer);
     LeaveCriticalSection(&m_outputLock);
 }
 
@@ -322,6 +211,9 @@ void RenderAPI_D3D11::CreateResources(ID3D11Device *d3device, ID3D11DeviceContex
 
     m_d3deviceUnity = d3device;
     m_d3dctxUnity = d3dctx;
+
+    m_frontBuffer = new TextureBuffer;
+    m_backBuffer = new TextureBuffer;
 
     UINT creationFlags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT; /* needed for hardware decoding */
     creationFlags |= D3D11_CREATE_DEVICE_DEBUG; //TODO: remove for release mode
@@ -358,10 +250,23 @@ void RenderAPI_D3D11::CreateResources(ID3D11Device *d3device, ID3D11DeviceContex
     DEBUG("Exiting CreateResources.\n");
 }
 
-
 void RenderAPI_D3D11::ReleaseResources()
 {
     DEBUG("Entering ReleaseResources.\n");
+    if(m_frontBuffer != nullptr)
+    {
+        ReleaseBuffer(m_frontBuffer);
+        delete m_frontBuffer;
+        m_frontBuffer = nullptr;
+    }
+
+    if(m_backBuffer != nullptr)
+    {
+        ReleaseBuffer(m_backBuffer);
+        delete m_backBuffer;
+        m_backBuffer = nullptr;
+    }
+
     if(m_d3deviceVLC)
     {
         m_d3deviceVLC->Release();
@@ -373,36 +278,129 @@ void RenderAPI_D3D11::ReleaseResources()
         m_d3dctxVLC->Release();
         m_d3deviceVLC = nullptr;
     }
+}
 
-    if(m_textureRenderTarget)
+void RenderAPI_D3D11::ReleaseBuffer(TextureBuffer* buffer)
+{
+    if(buffer->m_textureRenderTarget)
     {
-        m_textureRenderTarget->Release();
-        m_textureRenderTarget = nullptr;
+        buffer->m_textureRenderTarget->Release();
+        buffer->m_textureRenderTarget = nullptr;
     }
         
-    if(m_textureShaderInput)
+    if(buffer->m_textureShaderInput)
     {
-        m_textureShaderInput->Release();
-        m_textureShaderInput = nullptr;
+        buffer->m_textureShaderInput->Release();
+        buffer->m_textureShaderInput = nullptr;
     }
 
-    if(m_textureUnity)
+    if(buffer->m_textureUnity)
     {
-        m_textureUnity->Release();
-        m_textureUnity = nullptr;
+        buffer->m_textureUnity->Release();
+        buffer->m_textureUnity = nullptr;
+    }
+
+    if(buffer->m_sharedHandle)
+    {
+        CloseHandle(buffer->m_sharedHandle);
+        buffer->m_sharedHandle = nullptr;
+    }
+}
+
+void RenderAPI_D3D11::InitBuffer( TextureBuffer* buffer )
+{
+    DXGI_FORMAT renderFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    HRESULT hr;
+
+    /* interim texture */
+    D3D11_TEXTURE2D_DESC texDesc = { 0 };
+    texDesc.MipLevels = 1;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.CPUAccessFlags = 0;
+    texDesc.ArraySize = 1;
+    texDesc.Format = renderFormat;
+    texDesc.Height = m_height;
+    texDesc.Width  = m_width;
+    
+    hr = m_d3deviceUnity->CreateTexture2D( &texDesc, NULL, &buffer->m_textureUnity );
+    if (FAILED(hr))
+    {
+        DEBUG("CreateTexture2D FAILED \n");
+    }
+    else
+    {
+        DEBUG("CreateTexture2D SUCCEEDED.\n");
+    }
+
+    IDXGIResource1* sharedResource = NULL;
+
+    hr = buffer->m_textureUnity->QueryInterface(&sharedResource);
+    if(FAILED(hr))
+    {
+        DEBUG("get IDXGIResource1 FAILED \n");
+        abort();
+    }
+
+    hr = sharedResource->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, NULL, &buffer->m_sharedHandle);
+    if(FAILED(hr))
+    {
+        _com_error error(hr);
+        DEBUG("sharedResource->CreateSharedHandle FAILED %s \n", error.ErrorMessage());
+        abort();
+    }
+
+    sharedResource->Release();
+
+    ID3D11Device1* d3d11VLC1;
+    hr = m_d3deviceVLC->QueryInterface(&d3d11VLC1);
+    if(FAILED(hr))
+    {
+        _com_error error(hr);
+        DEBUG("QueryInterface ID3D11Device1 FAILED %s \n", error.ErrorMessage());
+        abort();
     }
     
-    if(m_outputTexture)
+    ID3D11Texture2D* textureVLC;
+    hr = d3d11VLC1->OpenSharedResource1(buffer->m_sharedHandle, __uuidof(ID3D11Texture2D), (void**)&textureVLC);
+    if(FAILED(hr))
     {
-        m_outputTexture->Release();
-        m_outputTexture = nullptr;
+        _com_error error(hr);
+        DEBUG("ctx->d3device->OpenSharedResource FAILED %s \n", error.ErrorMessage());
+        abort();
     }
 
-    if(m_sharedHandle)
+    d3d11VLC1->Release();
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC resviewDesc;
+    ZeroMemory(&resviewDesc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC));
+    resviewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    resviewDesc.Texture2D.MipLevels = 1;
+    resviewDesc.Format = texDesc.Format;
+    hr = m_d3deviceUnity->CreateShaderResourceView(buffer->m_textureUnity, &resviewDesc, &buffer->m_textureShaderInput);
+    if (FAILED(hr))
     {
-        CloseHandle(m_sharedHandle);
-        m_sharedHandle = nullptr;
+        DEBUG("CreateShaderResourceView FAILED \n");
     }
+    else
+    {
+        DEBUG("CreateShaderResourceView SUCCEEDED.\n");
+    }
+
+    D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
+    ZeroMemory(&renderTargetViewDesc, sizeof(D3D11_RENDER_TARGET_VIEW_DESC));
+    renderTargetViewDesc.Format = texDesc.Format;
+    renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+
+    hr = m_d3deviceVLC->CreateRenderTargetView(textureVLC, &renderTargetViewDesc, &buffer->m_textureRenderTarget);
+    if (FAILED(hr))
+    {
+        DEBUG("CreateRenderTargetView FAILED \n");
+    }
+
+    textureVLC->Release();// No need to keep a reference to that, VLC only writes to the renderTarget
 }
 
 bool RenderAPI_D3D11::UpdateOutput( const libvlc_video_direct3d_cfg_t *cfg, libvlc_video_output_cfg_t *out )
@@ -425,23 +423,24 @@ bool RenderAPI_D3D11::UpdateOutput( const libvlc_video_direct3d_cfg_t *cfg, libv
 
 void RenderAPI_D3D11::Swap()
 {
+    EnterCriticalSection(&m_outputLock);
     m_d3dctxVLC->Flush();
+    std::swap(m_frontBuffer, m_backBuffer);
     m_updated = true;
+    LeaveCriticalSection(&m_outputLock);
 }
 
 bool RenderAPI_D3D11::StartRendering( bool enter, const libvlc_video_direct3d_hdr10_metadata_t *hdr10 )
 {
     if ( enter )
     {
-        EnterCriticalSection(&m_outputLock);
         static const FLOAT blackRGBA[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
-        m_d3dctxVLC->OMSetRenderTargets(1, &m_textureRenderTarget, NULL);
-        m_d3dctxVLC->ClearRenderTargetView( m_textureRenderTarget, blackRGBA);
+        m_d3dctxVLC->OMSetRenderTargets(1, &m_backBuffer->m_textureRenderTarget, NULL);
+        m_d3dctxVLC->ClearRenderTargetView( m_backBuffer->m_textureRenderTarget, blackRGBA);
         return true;
     }
 
-    LeaveCriticalSection(&m_outputLock);
     return true;
 }
 
@@ -449,13 +448,12 @@ bool RenderAPI_D3D11::SelectPlane( size_t plane )
 {
     if ( plane != 0 ) // we only support one packed RGBA plane (DXGI_FORMAT_R8G8B8A8_UNORM)
         return false;
-    m_d3dctxVLC->OMSetRenderTargets( 1, &m_textureRenderTarget, NULL );
+    m_d3dctxVLC->OMSetRenderTargets( 1, &m_backBuffer->m_textureRenderTarget, NULL );
     return true;
 }
 
 bool RenderAPI_D3D11::Setup( const libvlc_video_direct3d_device_cfg_t *cfg, libvlc_video_direct3d_device_setup_t *out )
 {
-    DEBUG("Setup m_d3dctxVLC = %p this = %p", m_d3dctxVLC, this);
     out->device_context = m_d3dctxVLC;
     return true;
 }
@@ -489,21 +487,9 @@ void* RenderAPI_D3D11::getVideoFrame(bool* out_updated)
 {
     EnterCriticalSection(&m_outputLock);
     *out_updated = m_updated;
-    if(m_updated)
-    {
-        m_updated = false;
-        D3D11_BOX box = {
-            .top = 0,
-            .bottom = m_height,
-            .left = 0,
-            .right = m_width,
-            .back = 1,
-        };
-        m_d3dctxUnity->CopySubresourceRegion(m_outputTexture, 0, 0, 0, 0, m_textureUnity, 0, &box);
-    }
     
     LeaveCriticalSection(&m_outputLock);
-    return m_textureShaderInput;
+    return m_frontBuffer->m_textureShaderInput;
 }
 
 
